@@ -12,12 +12,13 @@ import {
   Sun,
 } from "lucide-react";
 
-import Sidebar        from "@/components/Sidebar";
-import Topbar         from "@/components/Topbar";
-import StatCard        from "@/components/StatCard";
-import TelemetryChart  from "@/components/TelemetryChart";
-import DevicesCard     from "@/components/DevicesCard";
-import MotorSpeedCard  from "@/components/MotorSpeedCard";
+import Sidebar          from "@/components/Sidebar";
+import Topbar           from "@/components/Topbar";
+import StatCard         from "@/components/StatCard";
+import TelemetryChart   from "@/components/TelemetryChart";
+import DevicesCard      from "@/components/DevicesCard";
+import MotorSpeedCard   from "@/components/MotorSpeedCard";
+import ThresholdsCard   from "@/components/ThresholdsCard";
 
 const SETTINGS_ID  = 1;
 const HISTORY_MAX  = 20;
@@ -43,10 +44,12 @@ export default function Dashboard() {
   });
 
   const [settings, setSettings] = useState({
-    mode:           "AUTO",
-    fan_override:   false,
-    light_override: false,
-    motor_speed:    200,
+    mode:               "AUTO",
+    fan_override:       false,
+    light_override:     false,
+    motor_speed:        200,
+    temp_threshold:     28.0,
+    humidity_threshold: 65.0,
   });
 
   const [history, setHistory]     = useState([]);
@@ -246,7 +249,7 @@ export default function Dashboard() {
             />
           </div>
 
-          {/* ── Motor speed ─────────────────────────── */}
+          {/* ── Motor speed + Thresholds ────────────── */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <MotorSpeedCard
               speed={settings.motor_speed ?? 200}
@@ -254,8 +257,14 @@ export default function Dashboard() {
               disabled={!isManual}
             />
 
+            <ThresholdsCard
+              settings={settings}
+              telemetry={telemetry}
+              onSave={(patch) => updateSettings(patch)}
+            />
+
             {/* Mini activity log */}
-            <div className="lg:col-span-2 glass card-hover rounded-2xl p-6"
+            <div className="glass card-hover rounded-2xl p-6"
                  style={{ background: "var(--surface)" }}>
               <div className="flex items-center gap-2 mb-4">
                 <Activity size={16} className="text-indigo-400" />

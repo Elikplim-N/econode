@@ -14,8 +14,9 @@ const spaceGrotesk = Space_Grotesk({
 });
 
 export const metadata = {
-  title: "EcoNode — Home IoT Dashboard",
-  description: "Professional home automation dashboard powered by EcoNode",
+  title: "IoT Enabled Smart Home Automation for Enhanced Energy Efficiency | GCTU",
+  description:
+    "A case study at Ghana Communication Technology University — IoT-enabled smart home automation node for enhanced energy efficiency.",
 };
 
 export default function RootLayout({ children }) {
