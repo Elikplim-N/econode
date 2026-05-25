@@ -78,7 +78,7 @@ export default function Dashboard() {
       // Historical (last 20 rows)
       const { data: hist } = await supabase
         .from("econode_telemetry")
-        .select("temperature,humidity,created_at")
+        .select("temperature,humidity,ldr_raw,created_at")
         .order("created_at", { ascending: true })
         .limit(HISTORY_MAX);
 
@@ -88,6 +88,7 @@ export default function Dashboard() {
             time: formatTime(r.created_at),
             temp: r.temperature,
             hum:  r.humidity,
+            ldr:  r.ldr_raw ?? null,
           }))
         );
       }
@@ -117,7 +118,12 @@ export default function Dashboard() {
               setHistory((prev) => {
                 const next = [
                   ...prev,
-                  { time: formatTime(row.created_at), temp: row.temperature, hum: row.humidity },
+                  {
+                    time: formatTime(row.created_at),
+                    temp: row.temperature,
+                    hum:  row.humidity,
+                    ldr:  row.ldr_raw ?? null,
+                  },
                 ];
                 return next.slice(-HISTORY_MAX);
               });
