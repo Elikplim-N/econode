@@ -311,16 +311,29 @@ void loop() {
 
       int getHttpCode = http.GET();
       if (getHttpCode > 0) {
+        String payload = http.getString(); // MUST read string before http.end()
         StaticJsonDocument<512> doc;
-        deserializeJson(doc, http.getString());
-        if (doc.size() > 0) {
+        DeserializationError err = deserializeJson(doc, payload);
+        if (!err && doc.size() > 0) {
           JsonObject row = doc[0];
-          cloudModeManual = (row["mode"].as<String>() == "MANUAL");
-          cloudFanOverride = row["fan_override"].as<bool>();
+          cloudModeManual    = (row["mode"].as<String>() == "MANUAL");
+          cloudFanOverride   = row["fan_override"].as<bool>();
           cloudLightOverride = row["light_override"].as<bool>();
           cloudMotorSpeed =
               constrain(row["motor_speed"] | MOTOR_DEFAULT_SPEED, 0, 255);
+
+          // Print what we received so we can verify in Serial Monitor
+          Serial.printf("[Cloud] Settings received → mode=%s | fan_ovr=%s | light_ovr=%s | speed=%d\n",
+                        cloudModeManual    ? "MANUAL" : "AUTO",
+                        cloudFanOverride   ? "true"   : "false",
+                        cloudLightOverride ? "true"   : "false",
+                        cloudMotorSpeed);
+        } else {
+          Serial.printf("[Cloud] GET parse error or empty row. HTTP=%d  raw=%s\n",
+                        getHttpCode, payload.c_str());
         }
+      } else {
+        Serial.printf("[Cloud] GET failed HTTP=%d\n", getHttpCode);
       }
       http.end();
 
