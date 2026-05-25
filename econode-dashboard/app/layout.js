@@ -1,38 +1,35 @@
 import "./globals.css";
-import { Instrument_Serif, Inter } from "next/font/google";
+import { Inter, Space_Grotesk } from "next/font/google";
 
-const display = Instrument_Serif({
-  subsets: ["latin"],
-  weight: ["400"],
-  style: ["normal", "italic"],
-  variable: "--font-display",
-});
-
-const body = Inter({
+const inter = Inter({
   subsets: ["latin"],
   variable: "--font-body",
+  display: "swap",
+});
+
+const spaceGrotesk = Space_Grotesk({
+  subsets: ["latin"],
+  variable: "--font-display",
+  display: "swap",
 });
 
 export const metadata = {
-  title: "Power-Optimized Automation",
-  description: "5V regulated IoT node — climate & lighting control",
+  title: "EcoNode — Home IoT Dashboard",
+  description: "Professional home automation dashboard powered by EcoNode",
 };
 
 export default function RootLayout({ children }) {
   return (
-    <html lang="en" className={`${display.variable} ${body.variable}`}>
-      <body className="antialiased bg-[#0a0a0c] text-zinc-100 min-h-screen">
-        {/* Ambient background — subtle warm gradient orbs over deep charcoal */}
+    <html lang="en" className={`${inter.variable} ${spaceGrotesk.variable}`}>
+      <body className="antialiased min-h-screen" style={{ background: "var(--bg)", color: "#e2e8f0" }}>
+        {/* Ambient gradient orbs */}
         <div className="fixed inset-0 -z-10 overflow-hidden pointer-events-none">
-          <div className="absolute -top-40 -left-40 h-[40rem] w-[40rem] rounded-full bg-amber-500/[0.06] blur-[120px]" />
-          <div className="absolute -bottom-40 -right-40 h-[40rem] w-[40rem] rounded-full bg-sky-500/[0.05] blur-[120px]" />
-          <div
-            className="absolute inset-0 opacity-[0.015]"
-            style={{
-              backgroundImage:
-                "url(\"data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E\")",
-            }}
-          />
+          <div className="absolute top-0 left-1/4 h-[50rem] w-[50rem] rounded-full opacity-30"
+               style={{ background: "radial-gradient(circle, rgba(99,102,241,0.12) 0%, transparent 70%)", filter: "blur(80px)" }} />
+          <div className="absolute bottom-0 right-1/4 h-[40rem] w-[40rem] rounded-full opacity-20"
+               style={{ background: "radial-gradient(circle, rgba(34,211,238,0.1) 0%, transparent 70%)", filter: "blur(80px)" }} />
+          <div className="absolute top-1/2 left-0 h-[30rem] w-[30rem] rounded-full opacity-15"
+               style={{ background: "radial-gradient(circle, rgba(245,158,11,0.08) 0%, transparent 70%)", filter: "blur(80px)" }} />
         </div>
         {children}
       </body>

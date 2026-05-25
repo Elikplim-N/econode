@@ -1,41 +1,68 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { supabase } from "@/lib/supabaseClient";
-import StatusPill from "@/components/StatusPill";
-import ModeSwitch from "@/components/ModeSwitch";
-import ClimateCard from "@/components/ClimateCard";
-import LightingCard from "@/components/LightingCard";
+import {
+  Thermometer,
+  Droplets,
+  Wind,
+  Eye,
+  Activity,
+  Zap,
+  Sun,
+} from "lucide-react";
 
-const SETTINGS_ID = 1;
+import Sidebar        from "@/components/Sidebar";
+import Topbar         from "@/components/Topbar";
+import StatCard        from "@/components/StatCard";
+import TelemetryChart  from "@/components/TelemetryChart";
+import DevicesCard     from "@/components/DevicesCard";
+import MotorSpeedCard  from "@/components/MotorSpeedCard";
+
+const SETTINGS_ID  = 1;
+const HISTORY_MAX  = 20;
+
+function formatTime(isoStr) {
+  if (!isoStr) return "";
+  const d = new Date(isoStr);
+  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
 
 export default function Dashboard() {
-  // Telemetry (sensors)
+  const [activeTab, setActiveTab] = useState("overview");
+
   const [telemetry, setTelemetry] = useState({
     temperature: null,
-    humidity: null,
-    motion: false,
-    is_dark: false,
-    fan_on: false,
-    light_on: false,
+    humidity:    null,
+    motion:      false,
+    is_dark:     false,
+    ldr_raw:     null,
+    fan_on:      false,
+    light_on:    false,
+    created_at:  null,
   });
 
-  // Device settings (mode + overrides)
   const [settings, setSettings] = useState({
-    mode: "AUTO", // "AUTO" | "MANUAL"
-    fan_override: false,
+    mode:           "AUTO",
+    fan_override:   false,
     light_override: false,
+    motor_speed:    200,
   });
 
-  const [loaded, setLoaded] = useState(false);
+  const [history, setHistory]     = useState([]);
+  const [loaded,  setLoaded]      = useState(false);
+  const [synced,  setSynced]      = useState(false);
+  const [lastSync, setLastSync]   = useState("");
 
-  // --- Initial load + realtime subscription ---
+  // Debounce motor speed saves
+  const speedTimer = useRef(null);
+
+  /* ── Initial fetch + realtime ───────────────────── */
   useEffect(() => {
-    let telemetryChannel;
-    let settingsChannel;
+    let telCh, setCh;
 
     const init = async () => {
-      // Fetch latest telemetry row
+      // Latest telemetry
       const { data: tRow } = await supabase
         .from("econode_telemetry")
         .select("*")
@@ -43,152 +70,223 @@ export default function Dashboard() {
         .limit(1)
         .maybeSingle();
 
-      if (tRow) setTelemetry((prev) => ({ ...prev, ...tRow }));
+      if (tRow) {
+        setTelemetry((p) => ({ ...p, ...tRow }));
+        setLastSync(formatTime(tRow.created_at));
+      }
 
-      // Fetch device settings (single row id=1)
+      // Historical (last 20 rows)
+      const { data: hist } = await supabase
+        .from("econode_telemetry")
+        .select("temperature,humidity,created_at")
+        .order("created_at", { ascending: true })
+        .limit(HISTORY_MAX);
+
+      if (hist) {
+        setHistory(
+          hist.map((r) => ({
+            time: formatTime(r.created_at),
+            temp: r.temperature,
+            hum:  r.humidity,
+          }))
+        );
+      }
+
+      // Device settings
       const { data: sRow } = await supabase
         .from("econode_device_settings")
         .select("*")
         .eq("id", SETTINGS_ID)
         .maybeSingle();
 
-      if (sRow) setSettings((prev) => ({ ...prev, ...sRow }));
+      if (sRow) setSettings((p) => ({ ...p, ...sRow }));
 
       setLoaded(true);
+      setSynced(true);
 
-      // Realtime: telemetry inserts/updates
-      telemetryChannel = supabase
-        .channel(`telemetry_${Date.now()}`)
-        .on(
-          "postgres_changes",
-          { event: "*", schema: "public", table: "econode_telemetry" },
-          (payload) => {
-            if (payload.new) {
-              setTelemetry((prev) => ({ ...prev, ...payload.new }));
-            }
-          }
-        )
+      /* ── Realtime subscriptions ────────────────── */
+      telCh = supabase
+        .channel(`tel_${Date.now()}`)
+        .on("postgres_changes",
+            { event: "*", schema: "public", table: "econode_telemetry" },
+            ({ new: row }) => {
+              if (!row) return;
+              setTelemetry((p) => ({ ...p, ...row }));
+              setLastSync(formatTime(row.created_at));
+              setSynced(true);
+              setHistory((prev) => {
+                const next = [
+                  ...prev,
+                  { time: formatTime(row.created_at), temp: row.temperature, hum: row.humidity },
+                ];
+                return next.slice(-HISTORY_MAX);
+              });
+            })
         .subscribe();
 
-      // Realtime: device settings updates (filtered to id=1)
-      settingsChannel = supabase
-        .channel(`settings_${Date.now()}`)
-        .on(
-          "postgres_changes",
-          {
-            event: "*",
-            schema: "public",
-            table: "econode_device_settings",
-            filter: `id=eq.${SETTINGS_ID}`,
-          },
-          (payload) => {
-            if (payload.new) {
-              setSettings((prev) => ({ ...prev, ...payload.new }));
-            }
-          }
-        )
+      setCh = supabase
+        .channel(`set_${Date.now()}`)
+        .on("postgres_changes",
+            { event: "*", schema: "public", table: "econode_device_settings", filter: `id=eq.${SETTINGS_ID}` },
+            ({ new: row }) => { if (row) setSettings((p) => ({ ...p, ...row })); })
         .subscribe();
     };
 
     init();
-
     return () => {
-      if (telemetryChannel) supabase.removeChannel(telemetryChannel);
-      if (settingsChannel) supabase.removeChannel(settingsChannel);
+      if (telCh) supabase.removeChannel(telCh);
+      if (setCh)  supabase.removeChannel(setCh);
     };
   }, []);
 
-  // --- Update helper ---
-  const updateSettings = async (patch) => {
-    // Optimistic update for snappy UI
-    setSettings((prev) => ({ ...prev, ...patch }));
-
-    const { error } = await supabase
+  /* ── Settings update ────────────────────────────── */
+  const updateSettings = useCallback(async (patch) => {
+    setSettings((p) => ({ ...p, ...patch }));
+    await supabase
       .from("econode_device_settings")
       .update(patch)
       .eq("id", SETTINGS_ID);
+  }, []);
 
-    if (error) {
-      console.error("Failed to update settings:", error.message);
-      // Realtime channel will reconcile if optimistic update was wrong
-    }
+  /* ── Motor speed (debounced) ───────────────────── */
+  const handleSpeedChange = (val) => {
+    setSettings((p) => ({ ...p, motor_speed: val }));
+    clearTimeout(speedTimer.current);
+    speedTimer.current = setTimeout(() => {
+      supabase
+        .from("econode_device_settings")
+        .update({ motor_speed: val })
+        .eq("id", SETTINGS_ID);
+    }, 500);
   };
 
-  // Effective fan/light state: in MANUAL, use override; in AUTO, use sensor-driven state
-  const effectiveFan = settings.mode === "MANUAL" ? settings.fan_override : telemetry.fan_on;
-  const effectiveLight = settings.mode === "MANUAL" ? settings.light_override : telemetry.light_on;
+  /* ── Derived ─────────────────────────────────────── */
+  const isManual    = settings.mode === "MANUAL";
+  const effectiveFan   = isManual ? settings.fan_override   : telemetry.fan_on;
+  const effectiveLight = isManual ? settings.light_override : telemetry.light_on;
 
+  const tempTrend =
+    history.length >= 2
+      ? history.at(-1).temp > history.at(-2).temp ? "up" : "down"
+      : null;
+
+  /* ── Render ──────────────────────────────────────── */
   return (
-    <main className="min-h-screen px-4 sm:px-6 lg:px-10 py-8 sm:py-12 max-w-6xl mx-auto">
-      {/* ───── HEADER ───── */}
-      <header className="mb-10 sm:mb-14">
-        <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-6">
-          {/* Title block */}
-          <div>
-            <div className="flex items-center gap-2 mb-3">
-              <div className="h-1 w-8 bg-amber-500 rounded-full" />
-              <span className="text-[10px] tracking-[0.3em] uppercase text-zinc-500">
-                EcoNode · IoT Dashboard
-              </span>
-            </div>
-            <h1 className="font-display text-5xl sm:text-6xl text-white leading-[1.05]">
-              Power-Optimized
-              <br />
-              <span className="italic text-amber-200/90">Automation</span>
-            </h1>
-            <p className="text-zinc-500 text-sm mt-3 max-w-md">
-              Dual-mode control for a 5V regulated node — climate and occupancy intelligence on a single sensor mesh.
-            </p>
+    <div className="flex h-screen overflow-hidden" style={{ background: "var(--bg)" }}>
+      <Sidebar activeTab={activeTab} onTabChange={setActiveTab} />
+
+      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+        <Topbar
+          synced={synced}
+          lastSync={lastSync}
+          mode={settings.mode}
+          onModeChange={(mode) => updateSettings({ mode })}
+        />
+
+        {/* ── Main scroll area ───────────────────── */}
+        <main className="flex-1 overflow-y-auto px-6 py-6 space-y-6">
+
+          {/* ── Stat row ───────────────────────────── */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <StatCard
+              label="Temperature"
+              value={telemetry.temperature != null ? telemetry.temperature.toFixed(1) : null}
+              unit="°C"
+              icon={Thermometer}
+              accent="#818cf8"
+              trend={tempTrend}
+              sublabel="DHT11 sensor"
+            />
+            <StatCard
+              label="Humidity"
+              value={telemetry.humidity != null ? Math.round(telemetry.humidity) : null}
+              unit="%"
+              icon={Droplets}
+              accent="#22d3ee"
+              sublabel="Relative humidity"
+            />
+            <StatCard
+              label="Fan"
+              value={effectiveFan ? "ON" : "OFF"}
+              unit=""
+              icon={Wind}
+              accent={effectiveFan ? "#818cf8" : "#475569"}
+              sublabel={isManual ? "Manual override" : "Threshold driven"}
+            />
+            <StatCard
+              label="Ambient Light"
+              value={telemetry.is_dark ? "Dark" : "Bright"}
+              unit=""
+              icon={Sun}
+              accent={telemetry.is_dark ? "#f59e0b" : "#fde68a"}
+              sublabel={
+                telemetry.ldr_raw != null
+                  ? `ADC: ${telemetry.ldr_raw} / 4095`
+                  : "LDR on GPIO 34"
+              }
+            />
           </div>
 
-          {/* Status pills + mode switch */}
-          <div className="flex flex-col items-start lg:items-end gap-4">
-            <div className="flex flex-wrap gap-2">
-              <StatusPill label="Cloud Sync Active" tone="emerald" />
-              <StatusPill label="5V Regulated" tone="sky" showDot={false} />
+          {/* ── Chart + Devices ─────────────────────── */}
+          <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+            <div className="xl:col-span-2">
+              <TelemetryChart data={history} />
             </div>
+            <DevicesCard
+              telemetry={telemetry}
+              settings={settings}
+              onFanToggle={(val)   => updateSettings({ fan_override:   val })}
+              onLightToggle={(val) => updateSettings({ light_override: val })}
+            />
+          </div>
 
-            <div className="flex items-center gap-3">
-              <span className="text-[10px] tracking-[0.2em] uppercase text-zinc-500">Master Mode</span>
-              <ModeSwitch
-                mode={settings.mode}
-                onChange={(mode) => updateSettings({ mode })}
-              />
+          {/* ── Motor speed ─────────────────────────── */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <MotorSpeedCard
+              speed={settings.motor_speed ?? 200}
+              onChange={handleSpeedChange}
+              disabled={!isManual}
+            />
+
+            {/* Mini activity log */}
+            <div className="lg:col-span-2 glass card-hover rounded-2xl p-6"
+                 style={{ background: "var(--surface)" }}>
+              <div className="flex items-center gap-2 mb-4">
+                <Activity size={16} className="text-indigo-400" />
+                <h3 className="font-display font-semibold text-white">Activity Log</h3>
+              </div>
+              <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                {history.length === 0 && (
+                  <p className="text-xs text-slate-600">Waiting for telemetry…</p>
+                )}
+                {[...history].reverse().map((row, i) => (
+                  <div key={i} className="flex items-center gap-3 text-xs py-2"
+                       style={{ borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+                    <span className="text-slate-600 tabular w-20 flex-shrink-0">{row.time}</span>
+                    <span className="w-1.5 h-1.5 rounded-full flex-shrink-0"
+                          style={{ background: "#818cf8" }} />
+                    <span className="text-slate-400">
+                      Temp <span className="text-white font-medium">{row.temp?.toFixed(1)}°C</span>
+                      {" · "}
+                      Hum <span className="text-white font-medium">{Math.round(row.hum)}%</span>
+                    </span>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
-        </div>
-      </header>
 
-      {/* ───── CARDS ───── */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 lg:gap-6">
-        <ClimateCard
-          temperature={telemetry.temperature}
-          humidity={telemetry.humidity}
-          fanOn={effectiveFan}
-          mode={settings.mode}
-          onFanToggle={(val) => updateSettings({ fan_override: val })}
-        />
-        <LightingCard
-          motion={telemetry.motion}
-          isDark={telemetry.is_dark}
-          lightOn={effectiveLight}
-          mode={settings.mode}
-          onLightToggle={(val) => updateSettings({ light_override: val })}
-        />
+          {/* ── Footer ──────────────────────────────── */}
+          <footer className="flex items-center justify-between pt-4 text-xs text-slate-700"
+                  style={{ borderTop: "1px solid var(--border)" }}>
+            <span>EcoNode EN-001 · Firmware v1.2 · L298N motor driver</span>
+            <span className="flex items-center gap-1.5">
+              <Zap size={10} className="text-amber-500" />
+              5V regulated · {loaded ? "Live" : "Connecting…"}
+            </span>
+          </footer>
+        </main>
       </div>
-
-      {/* ───── FOOTER ───── */}
-      <footer className="mt-12 pt-6 border-t border-white/5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-[11px] text-zinc-600">
-        <div className="flex items-center gap-4">
-          <span>Node ID: EN-001</span>
-          <span className="text-zinc-700">·</span>
-          <span>Firmware v1.2.0</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 pulse-dot" />
-          <span>Telemetry live · {loaded ? "Synced" : "Connecting…"}</span>
-        </div>
-      </footer>
-    </main>
+    </div>
   );
 }
