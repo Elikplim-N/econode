@@ -43,8 +43,10 @@ const char *supabase_key =
 #define MOTOR_DEFAULT_SPEED 200
 #define DHTTYPE DHT11
 #define NUM_LEDS 1
-#define TEMP_THRESHOLD 28.0
-#define HUMIDITY_THRESHOLD 65.0
+
+// Default thresholds (fallback if not set in Supabase)
+#define DEFAULT_TEMP_THRESHOLD     28.0
+#define DEFAULT_HUMIDITY_THRESHOLD 65.0
 
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
@@ -68,11 +70,13 @@ bool motionDetected = false;
 bool lightOn = false;
 
 // Cloud synced variables
-bool cloudModeManual = false;
-bool cloudFanOverride = false;
-bool cloudLightOverride = false;
-bool cloudSyncActive = false;
-int cloudMotorSpeed = MOTOR_DEFAULT_SPEED;
+bool  cloudModeManual      = false;
+bool  cloudFanOverride     = false;
+bool  cloudLightOverride   = false;
+bool  cloudSyncActive      = false;
+int   cloudMotorSpeed      = MOTOR_DEFAULT_SPEED;
+float cloudTempThreshold   = DEFAULT_TEMP_THRESHOLD;     // Editable from dashboard
+float cloudHumThreshold    = DEFAULT_HUMIDITY_THRESHOLD; // Editable from dashboard
 
 // Timing Variables (Stopwatches)
 unsigned long previousMotionMillis = 0;
@@ -268,8 +272,8 @@ void loop() {
       if (cloudModeManual) {
         fanRunning = cloudFanOverride;
       } else {
-        fanRunning =
-            (currentTemp >= TEMP_THRESHOLD || currentHum >= HUMIDITY_THRESHOLD);
+        // Use cloud-synced thresholds (editable from dashboard)
+        fanRunning = (currentTemp >= cloudTempThreshold || currentHum >= cloudHumThreshold);
       }
 
       if (fanRunning) {
@@ -282,11 +286,11 @@ void loop() {
         ledcWrite(MOTOR_ENA, 0);
       }
 
-      Serial.printf("[Sensors] Temp: %.1f C | Hum: %.1f %% | LDR: %d (%s) | "
-                    "Fan: %s (Spd: %d)\n",
-                    currentTemp, currentHum, ldrRaw, isDark ? "DARK" : "BRIGHT",
-                    fanRunning ? "ON" : "OFF",
-                    fanRunning ? cloudMotorSpeed : 0);
+      Serial.printf("[Sensors] Temp: %.1f C (thr:%.1f) | Hum: %.1f %% (thr:%.1f) | LDR: %d (%s) | Fan: %s\n",
+                    currentTemp, cloudTempThreshold,
+                    currentHum,  cloudHumThreshold,
+                    ldrRaw, isDark ? "DARK" : "BRIGHT",
+                    fanRunning ? "ON" : "OFF");
     } else {
       Serial.println("[Sensors] WARNING: Failed to read from DHT sensor!");
     }
@@ -319,15 +323,22 @@ void loop() {
           cloudModeManual    = (row["mode"].as<String>() == "MANUAL");
           cloudFanOverride   = row["fan_override"].as<bool>();
           cloudLightOverride = row["light_override"].as<bool>();
-          cloudMotorSpeed =
-              constrain(row["motor_speed"] | MOTOR_DEFAULT_SPEED, 0, 255);
+          cloudMotorSpeed    = constrain(row["motor_speed"] | MOTOR_DEFAULT_SPEED, 0, 255);
+
+          // Editable thresholds from dashboard (fallback to defaults if column missing)
+          float t = row["temp_threshold"] | DEFAULT_TEMP_THRESHOLD;
+          float h = row["humidity_threshold"] | DEFAULT_HUMIDITY_THRESHOLD;
+          cloudTempThreshold = constrain(t, 15.0f, 45.0f);
+          cloudHumThreshold  = constrain(h, 20.0f, 95.0f);
 
           // Print what we received so we can verify in Serial Monitor
-          Serial.printf("[Cloud] Settings received → mode=%s | fan_ovr=%s | light_ovr=%s | speed=%d\n",
+          Serial.printf("[Cloud] Settings → mode=%s | fan=%s | light=%s | speed=%d | T_thr=%.1f | H_thr=%.1f\n",
                         cloudModeManual    ? "MANUAL" : "AUTO",
                         cloudFanOverride   ? "true"   : "false",
                         cloudLightOverride ? "true"   : "false",
-                        cloudMotorSpeed);
+                        cloudMotorSpeed,
+                        cloudTempThreshold,
+                        cloudHumThreshold);
         } else {
           Serial.printf("[Cloud] GET parse error or empty row. HTTP=%d  raw=%s\n",
                         getHttpCode, payload.c_str());
